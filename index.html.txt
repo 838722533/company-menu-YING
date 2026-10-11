@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+<title>公司点餐</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,sans-serif;background:#f5f5f5;font-size:15px;color:#333;
+  max-width:480px;margin:0 auto;min-height:100vh;padding-bottom:70px}
+.topbar{background:#ff6b35;color:#fff;padding:16px;display:flex;justify-content:space-between;align-items:center}
+.topbar .balance{font-size:14px}
+.cats{position:fixed;top:56px;left:0;width:72px;bottom:64px;background:#fff;overflow-y:auto;z-index:2}
+.cats div{padding:14px 8px;text-align:center;font-size:14px;cursor:pointer;border-left:3px solid transparent}
+.cats div.on{color:#ff6b35;border-left-color:#ff6b35;background:#fff5f0}
+.list{position:fixed;top:56px;left:72px;right:0;bottom:64px;overflow-y:auto;padding:8px}
+.dish{background:#fff;border-radius:10px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.dish .info{flex:1}
+.dish .name{font-weight:bold}
+.dish .price{color:#ff6b35;font-size:13px;margin-top:4px}
+.dish .stock{color:#999;font-size:12px}
+.stepper{display:flex;align-items:center;gap:8px}
+.stepper button{width:30px;height:30px;border-radius:50%;border:1px solid #ddd;background:#fff;font-size:18px;cursor:pointer}
+.stepper button.add{background:#ff6b35;color:#fff;border-color:#ff6b35}
+.stepper span{min-width:20px;text-align:center}
+.bottom{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:#fff;border-top:1px solid #eee;padding:10px 16px;display:flex;align-items:center;gap:10px;z-index:3}
+.bottom .info{flex:1;font-size:14px}
+.bottom input{flex:1;border:1px solid #ddd;border-radius:6px;padding:6px 8px;font-size:13px}
+.bottom button{background:#ff6b35;color:#fff;border:none;border-radius:20px;padding:8px 20px;font-size:14px;cursor:pointer}
+.tabs{display:flex;background:#fff;border-bottom:1px solid #eee}
+.tabs div{flex:1;text-align:center;padding:12px;cursor:pointer;font-size:14px;border-bottom:2px solid transparent}
+.tabs div.on{color:#ff6b35;border-bottom-color:#ff6b35}
+.page{display:none}.page.on{display:block}
+.order-card{background:#fff;margin:8px;border-radius:10px;padding:12px}
+.order-card .row{display:flex;justify-content:space-between;margin-bottom:6px}
+.order-card .tag{font-size:12px;padding:2px 8px;border-radius:4px;background:#eee}
+.order-card .tag.pending{background:#fff3e0;color:#e67e22}
+.order-card .tag.accepted{background:#e3f2fd;color:#1976d2}
+.order-card .tag.done{background:#e8f5e9;color:#388e3c}
+.order-card .tag.cancelled{background:#eee;color:#999;text-decoration:line-through}
+.admin-section{padding:12px}
+.admin-section input,.admin-section select{width:100%;padding:8px;margin-bottom:8px;border:1px solid #ddd;border-radius:6px;font-size:14px}
+.admin-section button{background:#ff6b35;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer;margin-right:8px}
+.pwd-gate{text-align:center;padding:60px 20px}
+.pwd-gate input{padding:10px;border:1px solid #ddd;border-radius:8px;font-size:16px;text-align:center;margin-bottom:12px;width:200px}
+.pwd-gate button{background:#ff6b35;color:#fff;border:none;border-radius:20px;padding:10px 30px;font-size:16px;cursor:pointer}
+.name-gate{text-align:center;padding:60px 20px}
+.name-gate input{padding:10px;border:1px solid #ddd;border-radius:8px;font-size:16px;text-align:center;margin-bottom:12px;width:200px}
+.name-gate button{background:#ff6b35;color:#fff;border:none;border-radius:20px;padding:10px 30px;font-size:16px;cursor:pointer}
+.toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.75);color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:99;display:none}
+</style>
+</head>
+<body>
+
+<!-- 名字输入页（首次） -->
+<div id="nameGate" class="name-gate" style="display:none">
+  <h3>欢迎来到公司点餐</h3>
+  <p style="color:#999;margin:12px 0">请输入你的姓名</p>
+  <input id="nameInput" placeholder="你的名字" />
+  <br/>
+  <button onclick="saveName()">确认</button>
+</div>
+
+<!-- 主界面 -->
+<div id="mainApp" style="display:none">
+  <div class="topbar">
+    <span>你好，<b id="userName"></b></span>
+    <span class="balance">余额 ¥<span id="bal">0</span></span>
+  </div>
+
+  <div class="tabs" id="mainTabs">
+    <div class="on" onclick="showPage('menu')">点餐</div>
+    <div onclick="showPage('orders')">我的订单</div>
+    <div onclick="showPage('admin')">管理员</div>
+  </div>
+
+  <!-- 点餐页 -->
+  <div class="page on" id="pageMenu">
+    <div class="cats" id="cats"></div>
+    <div class="list" id="dishList"></div>
+    <div class="bottom" id="bottomBar" style="display:none">
+      <span class="info"><span id="cartCount">0</span> 件 · ¥<span id="cartTotal">0</span></span>
+      <input id="remarkInput" placeholder="备注：少辣/不要葱" />
+      <button onclick="submitOrder()">下单</button>
+    </div>
+  </div>
+
+  <!-- 订单页 -->
+  <div class="page" id="pageOrders">
+    <div id="orderList"></div>
+  </div>
+
+  <!-- 管理员页 -->
+  <div class="page" id="pageAdmin">
+    <div class="pwd-gate" id="adminGate">
+      <h3>管理员登录</h3>
+      <input type="password" id="adminPwd" placeholder="管理密码" />
+      <br/><button onclick="checkAdmin()">进入</button>
+    </div>
+    <div id="adminPanel" style="display:none">
+      <div class="tabs">
+        <div class="on" onclick="showAdminTab(0)">今日订单</div>
+        <div onclick="showAdminTab(1)">成员管理</div>
+        <div onclick="showAdminTab(2)">菜品管理</div>
+      </div>
+      <div class="admin-section" id="adminOrders"></div>
+      <div class="admin-section" id="adminUsers" style="display:none"></div>
+      <div class="admin-section" id="adminDishes" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ====== 配置区（改成你自己的） ======
+const SUPABASE_URL = 'https://fwwcvuopmdlnlmijsrwc.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_SQKal2ylfFPHqac8uaVfAg_PO_WB7iM'
+const ADMIN_PWD = 'admin123'   // 管理员密码，自己改
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+let currentUser = null
+let allDishes = []
+let cart = {}
+let curCat = '全部'
+
+// ====== 初始化 ======
+async function init() {
+  currentUser = localStorage.getItem('companyUserName')
+  if (!currentUser) {
+    document.getElementById('nameGate').style.display = 'block'
+    return
+  }
+  document.getElementById('userName').textContent = currentUser
+  document.getElementById('mainApp').style.display = 'block'
+
+  // 确保用户存在
+  const { data: u } = await supabase.from('users').select('*').eq('name', currentUser).single()
+  if (!u) {
+    await supabase.from('users').insert([{ name: currentUser, balance: 0, role: 'member' }])
+  }
+  loadBalance()
+  loadDishes()
+  loadOrders()
+}
+
+function saveName() {
+  const n = document.getElementById('nameInput').value.trim()
+  if (!n) return toast('请输入名字')
+  localStorage.setItem('companyUserName', n)
+  location.reload()
+}
+
+// ====== 点餐 ======
+async function loadDishes() {
+  const { data, error } = await supabase.from('dishes').select('*').eq('status', 1).order('sort')
+  if (error) return console.error(error)
+  allDishes = data
+  const cats = ['全部', ...new Set(data.map(d => d.category).filter(Boolean))]
+  const catsEl = document.getElementById('cats')
+  catsEl.innerHTML = cats.map(c =>
+    `<div class="${c===curCat?'on':''}" onclick="switchCat('${c}')">${c}</div>`
+  ).join('')
+  renderDishes()
+}
+
+function switchCat(c) {
+  curCat = c
+  loadDishes()
+}
+
+function renderDishes() {
+  const list = curCat === '全部' ? allDishes : allDishes.filter(d => d.category === curCat)
+  const el = document.getElementById('dishList')
+  el.innerHTML = list.map(d => {
+    const qty = cart[d.id] || 0
+    return `<div class="dish">
+      <div class="info">
+        <div class="name">${d.name}</div>
+        <div class="price">¥${d.price}  <span class="stock">库存${d.stock}</span></div>
+      </div>
+      <div class="stepper">
+        <button onclick="changeQty(${d.id},-1)">-</button>
+        <span>${qty}</span>
+        <button class="add" onclick="changeQty(${d.id},1)">+</button>
+      </div>
+    </div>`
+  }).join('')
+}
+
+function changeQty(id, d) {
+  const dish = allDishes.find(x => x.id === id)
+  const cur = cart[id] || 0
+  const next = cur + d
+  if (next < 0 || next > dish.stock) return
+  if (next === 0) delete cart[id]; else cart[id] = next
+  renderDishes()
+  updateBar()
+}
+
+function updateBar() {
+  let count = 0, total = 0
+  for (const id in cart) {
+    const dish = allDishes.find(x => x.id === +id)
+    count += cart[id]
+    total += cart[id] * dish.price
+  }
+  document.getElementById('cartCount').textContent = count
+  document.getElementById('cartTotal').textContent = total
+  document.getElementById('bottomBar').style.display = count > 0 ? 'flex' : 'none'
+}
+
+async function submitOrder() {
+  let count = 0, total = 0, items = []
+  for (const id in cart) {
+    const dish = allDishes.find(x => x.id === +id)
+    items.push({ id: dish.id, name: dish.name, price: dish.price, qty: cart[id] })
+    count += cart[id]
+    total += cart[id] * dish.price
+  }
+  if (!count) return
+
+  const { data: u } = await supabase.from('users').select('balance').eq('name', currentUser).single()
+  if (u.balance < total) return toast('余额不足，找行政充值')
+
+  const remark = document.getElementById('remarkInput').value.trim()
+  const loading = toast('下单中...')
+
+  try {
+    // 用 RPC 事务式下单（下面会创建这个 function）
+    const { data: res, error } = await supabase.rpc('place_order', {
+      p_user: currentUser,
+      p_items: items,
+      p_total: total,
+      p_remark: remark
+    })
+    if (error) throw error
+    if (res.code !== 0) return toast(res.msg)
+
+    cart = {}
+    document.getElementById('remarkInput').value = ''
+    renderDishes()
+    updateBar()
+    toast('✅ 下单成功')
+    loadBalance()
+    loadDishes()
+    loadOrders()
+  } catch (e) {
+    toast('下单失败: ' + e.message)
+  }
+}
+
+// ====== 余额 ======
+async function loadBalance() {
+  const { data } = await supabase.from('users').select('balance').eq('name', currentUser).single()
+  if (data) document.getElementById('bal').textContent = data.balance
+}
+
+// ====== 我的订单 ======
+async function loadOrders() {
+  const { data } = await supabase.from('orders').select('*').eq('user_name', currentUser).order('created_at', { ascending: false }).limit(30)
+  const el = document.getElementById('orderList')
+  if (!data || !data.length) { el.innerHTML = '<p style="text-align:center;color:#999;padding:40px">暂无订单</p>'; return }
+  const ST = { pending:'待接单', accepted:'制作中', done:'已完成', cancelled:'已取消' }
+  el.innerHTML = data.map(o => {
+    const its = o.items.map(it => `${it.name} ×${it.qty}`).join('<br/>')
+    const t = new Date(o.created_at)
+    const ts = `${t.getMonth()+1}/${t.getDate()} ${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`
+    return `<div class="order-card">
+      <div class="row"><b>${its}</b><span class="tag ${o.status}">${ST[o.status]||o.status}</span></div>
+      <div class="row"><span style="color:#999;font-size:12px">${ts} ${o.remark?'· '+o.remark:''}</span><b style="color:#ff6b35">¥${o.total}</b></div>
+    </div>`
+  }).join('')
+}
+
+// ====== 导航 ======
+function showPage(p) {
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('on'))
+  document.querySelectorAll('#mainTabs div').forEach(el => el.classList.remove('on'))
+  document.getElementById('page' + p[0].toUpperCase() + p.slice(1)).classList.add('on')
+  const tabs = document.getElementById('mainTabs').children
+  const idx = { menu:0, orders:1, admin:2 }[p]
+  tabs[idx].classList.add('on')
+  if (p === 'orders') loadOrders()
+  if (p === 'admin') {
+    document.getElementById('adminGate').style.display = ''
+    document.getElementById('adminPanel').style.display = 'none'
+  }
+}
+
+// ====== 管理员 ======
+function checkAdmin() {
+  if (document.getElementById('adminPwd').value !== ADMIN_PWD) return toast('密码错误')
+  document.getElementById('adminGate').style.display = 'none'
+  document.getElementById('adminPanel').style.display = ''
+  loadAdminOrders()
+}
+
+function showAdminTab(i) {
+  document.querySelectorAll('#adminPanel .tabs div').forEach((el,idx) => el.classList.toggle('on', idx===i))
+  document.getElementById('adminOrders').style.display = i===0?'':'none'
+  document.getElementById('adminUsers').style.display = i===1?'':'none'
+  document.getElementById('adminDishes').style.display = i===2?'':'none'
+  if (i===0) loadAdminOrders()
+  if (i===1) loadAdminUsers()
+  if (i===2) loadAdminDishes()
+}
+
+async function loadAdminOrders() {
+  const today = new Date().toISOString().split('T')[0]
+  const { data } = await supabase.from('orders').select('*').gte('created_at', today).order('created_at', { ascending: false })
+  const el = document.getElementById('adminOrders')
+  if (!data || !data.length) { el.innerHTML = '<p style="color:#999">今日无订单</p>'; return }
+  const ST = { pending:'待接单', accepted:'制作中', done:'已完成', cancelled:'已取消' }
+  el.innerHTML = data.map(o => {
+    const its = o.items.map(it => `${it.name} ×${it.qty}`).join('<br/>')
+    return `<div class="order-card">
+      <div class="row"><b>${o.user_name}</b><span class="tag ${o.status}">${ST[o.status]}</span></div>
+      <div style="font-size:13px;margin:6px 0">${its}</div>
+      ${o.remark ? `<div style="color:#e67e22;font-size:12px">备注：${o.remark}</div>` : ''}
+      <div class="row" style="margin-top:8px">
+        <b style="color:#ff6b35">¥${o.total}</b>
+        <div>
+          ${o.status==='pending'?`<button onclick="setOrderStatus(${o.id},'accepted')">接单</button>`:''}
+          ${o.status==='accepted'?`<button onclick="setOrderStatus(${o.id},'done')">完成</button>`:''}
+          ${o.status!=='done'&&o.status!=='cancelled'?`<button onclick="setOrderStatus(${o.id},'cancelled')">取消</button>`:''}
+        </div>
+      </div>
+    </div>`
+  }).join('')
+}
+
+async function setOrderStatus(id, s) {
+  await supabase.from('orders').update({ status: s }).eq('id', id)
+  loadAdminOrders()
+  loadOrders()
+}
+
+async function loadAdminUsers() {
+  const { data } = await supabase.from('users').select('*').order('balance', { ascending: false })
+  const el = document.getElementById('adminUsers')
+  el.innerHTML = '<h4 style="margin-bottom:8px">充值</h4>' + data.map(u =>
+    `<div class="order-card row">
+      <div><b>${u.name}</b> <span style="color:#999;font-size:12px">余额¥${u.balance}</span></div>
+      <div style="display:flex;gap:6px">
+        <input type="number" id="amt_${u.name}" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:4px" placeholder="金额"/>
+        <button onclick="doRecharge('${u.name}')">充值</button>
+      </div>
+    </div>`
+  ).join('')
+}
+
+async function doRecharge(name) {
+  const amt = parseInt(document.getElementById('amt_'+name).value)
+  if (!amt || amt <= 0) return toast('输入金额')
+  const { data: u } = await supabase.from('users').select('id,balance').eq('name', name).single()
+  await supabase.from('users').update({ balance: u.balance + amt }).eq('id', u.id)
+  await supabase.from('transactions').insert([{ user_name: name, type: 'recharge', amount: amt, note: '管理员充值' }])
+  toast('充值成功')
+  loadAdminUsers()
+}
+
+async function loadAdminDishes() {
+  const { data } = await supabase.from('dishes').select('*').order('sort')
+  const el = document.getElementById('adminDishes')
+  el.innerHTML = `
+    <h4 style="margin-bottom:8px">添加菜品</h4>
+    <input id="newName" placeholder="菜名"/>
+    <input id="newPrice" type="number" placeholder="价格"/>
+    <input id="newCat" placeholder="分类（如主食/荤菜）"/>
+    <button onclick="addDish()">添加</button>
+    <h4 style="margin:16px 0 8px">已有菜品</h4>
+    ${data.map(d => `
+      <div class="order-card row">
+        <span>${d.name} ¥${d.price} 库存${d.stock}</span>
+        <div>
+          <button onclick="dishStock(${d.id},10)">+10</button>
+          <button onclick="dishStatus(${d.id},${d.status})">${d.status===1?'下架':'上架'}</button>
+        </div>
+      </div>
+    `).join('')}
+  `
+}
+
+async function addDish() {
+  const name = document.getElementById('newName').value.trim()
+  const price = parseInt(document.getElementById('newPrice').value)
+  const cat = document.getElementById('newCat').value.trim()
+  if (!name || !price) return toast('填全')
+  await supabase.from('dishes').insert([{ name, price, category: cat||'其他', stock: 999, status: 1, sort: Date.now() }])
+  toast('已添加')
+  loadAdminDishes()
+}
+
+async function dishStock(id, n) {
+  await supabase.rpc('add_stock', { p_id: id, p_n: n })
+  loadAdminDishes()
+}
+
+async function dishStatus(id, s) {
+  await supabase.from('dishes').update({ status: s === 1 ? 0 : 1 }).eq('id', id)
+  loadAdminDishes()
+}
+
+// ====== 工具 ======
+function toast(msg) {
+  const t = document.getElementById('toast')
+  t.textContent = msg; t.style.display = 'block'
+  setTimeout(() => t.style.display = 'none', 2000)
+}
+
+init()
+</script>
+</body>
+</html>
